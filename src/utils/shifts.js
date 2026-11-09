@@ -32,6 +32,9 @@ export function checkInNotification(dayType, checkInDate, settings) {
       return 'موعد الانصراف ١٢ منتصف الليل — لا تنسَ التسجيل'
     case 'shift3':
       return 'موعد الانصراف ٨ صباحًا'
+    // تعديل 1 (دورة جديدة): تنبيه الخاصة الأولى (التصاريح بلا اختيار خاص)
+    case 'shiftX':
+      return `موعد الانصراف ${((settings && settings.specialShifts && settings.specialShifts[0] && settings.specialShifts[0].end) || '17:00')} — وردية خاصة`
     case 'alt_day': {
       const h = settings?.altDayMinHours || 6
       const d = new Date(checkInDate)

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-export default function TimeEditDialog({ open, onClose, onSave, title, currentTime, onDelete, hasTime }) {
+export default function TimeEditDialog({ open, onClose, onSave, title, currentTime, onDelete, hasTime, offsetLabel }) {
   const [time, setTime] = useState(currentTime || '08:00')
   const [savedTime, setSavedTime] = useState(currentTime || '08:00')
   const [confirming, setConfirming] = useState(false)
@@ -32,7 +32,13 @@ export default function TimeEditDialog({ open, onClose, onSave, title, currentTi
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog-box" onClick={e => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-center mb-4">{title}</h3>
+        <div className="flex items-center justify-center gap-2 mb-4 flex-wrap">
+          <h3 className="text-lg font-bold text-center">{title}</h3>
+          {/* تعديل 1 (v12.12): خانة الترحيل جنب العنوان في نفس السطر متسنترة */}
+          {offsetLabel ? (
+            <span className="px-3 py-1.5 text-center text-sm font-bold border-2 border-blue-200 rounded-xl bg-blue-50 text-blue-700" dir="ltr">{offsetLabel}</span>
+          ) : null}
+        </div>
         <input type="time" value={time} onChange={e => { setTime(e.target.value); setConfirming(false) }}
           className="w-full p-3 text-center text-xl font-bold border-2 border-blue-200 rounded-xl focus:border-blue-500 outline-none mb-4" dir="ltr" />
         

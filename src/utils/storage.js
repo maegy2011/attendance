@@ -11,6 +11,7 @@ const KEYS = {
   LEAVES_V2: 'att_leaves_v2',
   DELETED_ALT: 'att_deleted_alt',
   PERMITS_V2: 'att_permits_v2',
+  EXTRA_NOTES: 'att_extra_notes',
 }
 
 const defaultSettings = {
@@ -36,6 +37,8 @@ const defaultSettings = {
   // الشاشة الجديدة: homeScreen (قديمة/جديدة — الافتراضي الجديدة v12.9.48)
   homeScreen: 'new',
   backupPath: '',
+  // تعديل 3 (2 نوفمبر 2026): معايرة التوقيع على جهاز البصمة — بالثواني (+/-) — التخزين = المظبوط
+  clockOffsetSec: 0,
   // التعديل ٢٥ (دورة سادسة): آخر مسارات ملفات PDF
   lastPdfVac: '',
   lastPdfAlt: '',
@@ -44,6 +47,10 @@ const defaultSettings = {
   currency: 'ج',
   hourRounding: 'floor',
   weekendDays: [5, 6],
+  // تعديل 6 (v12.12): مدد نظام العمل الدورية — فاضية = الافتراضي الحالي شغال
+  tardinessPeriods: [],
+  // تعديل 1 (دورة جديدة): الورديات الخاصة قايمة بعدة أسماء — الافتراضي فارغ
+  specialShifts: [],
   recordsOrientation: 'vertical',
   pinEnabled: false,
   // تعديل ٥: تحكم منفصل لكل جزء محمي (الكل مقفول افتراضيًا = السلوك الحالي)
@@ -84,6 +91,36 @@ export function getSettings() {
     if (!oc.hd_home && oc.homehd) s.colors.hd_home = oc.homehd
     if (!oc.hd_records && oc.recordhd1) s.colors.hd_records = oc.recordhd1
     if (s.hourRounding === 'round' || s.hourRounding === 'half') s.hourRounding = 'floor'
+    // تعديل 1 (دورة جديدة): الخاصة المفردة ← قايمة بعدة أسماء (ترحيل تلقائي + قيم افتراضية)
+    try {
+      const base = { start: '08:00', end: '17:00', otFactor: 1, deductOn: true, deductHours: 7, lunchOn: true, lunchHours: 8, lunchValue: Number(s.lunchValue) || 0, bonusOn: false, bonusHours: 7, taxiOn: false, taxiHours: 7, graceMin: 0 }
+      if (!Array.isArray(s.specialShifts)) {
+        if (s.specialShift && typeof s.specialShift === 'object') {
+          const o = s.specialShift
+          const wrapped = { id: 'sp' + Date.now(), name: 'وردية خاصة', ...base, ...o, lunchValue: (o.lunchValue !== undefined ? o.lunchValue : base.lunchValue) }
+          delete wrapped.otMethod
+          delete wrapped.minusHours
+          s.specialShifts = [wrapped]
+        } else {
+          s.specialShifts = []
+        }
+      } else {
+        s.specialShifts = s.specialShifts.filter(x => x && typeof x === 'object').map((x, i) => ({ id: x.id || ('sp' + Date.now() + i), name: x.name || ('خاصة ' + (i + 1)), ...base, ...x, lunchValue: (x.lunchValue !== undefined ? x.lunchValue : base.lunchValue) }))
+      }
+      delete s.specialShift
+    } catch {}
+    // تعديل 3 (دورة جديدة): ترحيل الخاصة القديمة (otMethod/minusHours) للجديدة (otFactor/deductOn/deductHours)
+    if (s.specialShift && s.specialShift.otFactor === undefined) {
+      const m = s.specialShift.otMethod || 'minus'
+      s.specialShift = {
+        ...defaultSettings.specialShift, ...s.specialShift,
+        otFactor: m === 'x2' ? 2 : m === 'x1.5' ? 1.5 : 1,
+        deductOn: m === 'minus',
+        deductHours: Number(s.specialShift.minusHours) || 7,
+      }
+      delete s.specialShift.otMethod
+      delete s.specialShift.minusHours
+    }
     // v12.9.52: تثبيت claw — الثيمات اتشالت خالص (اللوحة + المخصصة + التعديلات)
     s.appTheme = 'default'
     s.homeTheme = 'classic'
@@ -156,6 +193,14 @@ export function savePermitsV2(list) {
   localStorage.setItem(KEYS.PERMITS_V2, JSON.stringify(deduped))
 }
 
+// تعديل 2 (v12.15.6): ملاحظات مستقلة — صفحة جديدة ملهاش دعوة بملاحظات السجلات — تخزين لحظي
+export function getExtraNotes() {
+  try { const raw = localStorage.getItem(KEYS.EXTRA_NOTES); const a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : [] } catch { return [] }
+}
+export function saveExtraNotes(list) {
+  try { localStorage.setItem(KEYS.EXTRA_NOTES, JSON.stringify(Array.isArray(list) ? list : [])) } catch {}
+}
+
 export function backupAll() {
   return {
     records: getRecords(),
@@ -166,6 +211,7 @@ export function backupAll() {
     leavesV2: getLeavesV2(),
     permitsV2: getPermitsV2(),
     deletedAlt: getDeletedAlt(),
+    extraNotes: getExtraNotes(),
     annualLeaveUsed: localStorage.getItem(KEYS.ANNUAL_LEAVE_USED),
     restDaysUsed: localStorage.getItem(KEYS.REST_DAYS_USED),
     leaveYear: localStorage.getItem(KEYS.LEAVE_YEAR),
@@ -182,6 +228,7 @@ export function restoreAll(data) {
   if (data.leavesV2) saveLeavesV2(data.leavesV2)
   if (data.permitsV2) savePermitsV2(data.permitsV2)
   if (data.deletedAlt) saveDeletedAlt(data.deletedAlt)
+  if (data.extraNotes) saveExtraNotes(data.extraNotes)
   if (data.annualLeaveUsed) localStorage.setItem(KEYS.ANNUAL_LEAVE_USED, data.annualLeaveUsed)
   if (data.restDaysUsed) localStorage.setItem(KEYS.REST_DAYS_USED, data.restDaysUsed)
   if (data.leaveYear) localStorage.setItem(KEYS.LEAVE_YEAR, data.leaveYear)

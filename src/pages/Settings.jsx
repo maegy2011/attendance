@@ -7,6 +7,7 @@ import { getPin, setPin, backupAll, restoreAll, getRecords, getDefaultSettings }
 import { decryptJSON, hashAndStorePin, verifyPin, pinExists, isMaster, normDigits, pinStoreState, subtleOK } from '../utils/pinCrypto'
 // التعديل ٤ (ب): التصدير اليدوي يختم تاريخ النسخة (نفس مفتاح التلقائي)
 import { stampBackupNow } from '../utils/notices'
+import { defaultSlicesFor, addMinutes } from '../utils/periods'
 // التعديل ١٠: الماستر = رقم الإصدار المبخوز
 import { version as APP_VERSION } from '../../package.json'
 // التعديل ٨ (ج): مشاركة التقرير بعد التصدير
@@ -15,6 +16,8 @@ import { isPinOn } from '../hooks/usePinArea'
 import { exportVacationsPdf, exportAltdaysPdf, exportExtraPdf, exportTardiesPdf, openPdf } from '../utils/pdfExport'
 import PinGate from '../components/PinGate'
 import ThemeTab from '../components/ThemeTab'
+import PeriodsCard from '../components/PeriodsCard'
+import SpecialShiftCard from '../components/SpecialShiftCard'
 import PhotoEditor from '../components/PhotoEditor'
 import { usePinArea } from '../hooks/usePinArea'
 import pkg from '../../package.json'
@@ -36,6 +39,52 @@ const TABS = [
 
 const DAY_NAMES = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
 
+// تعديل 3 (2 نوفمبر 2026): كارت معايرة التوقيع — 3 سطور (الاصلي عرض + الترحيل تعديل + المظبوط عرض)
+function CalibrationCard({ settings, setSimple }) {
+  const [now, setNow] = useState(() => new Date())
+  // تعديل 3: طي الكارت — مغلق افتراضيا
+  const [calOpen, setCalOpen] = useState(false)
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const off = Number(settings.clockOffsetSec) || 0
+  // تعديل 2 (v12.15.8): تحويل الأرقام العربية للإنجليزية — كيبوردات الموبايلات العربية بتطلع ٠١٢٣ والمتصفح بيرفضها في خانة number
+  const ar2en = (s) => String(s ?? '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d]/g, '')
+  const sign = off < 0 ? -1 : 1
+  const absMin = Math.floor(Math.abs(off) / 60)
+  const absSec = Math.abs(off) % 60
+  const setOff = (s, m, sec) => {
+    const mm = Math.max(0, parseInt(m) || 0)
+    const ss = Math.min(59, Math.max(0, parseInt(sec) || 0))
+    setSimple('clockOffsetSec', s * (mm * 60 + ss))
+  }
+  const fmt = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+  const cal = new Date(now.getTime() + off * 1000)
+  return (
+    <div className="card" style={{ padding: '8px' }}>
+      <button onClick={() => setCalOpen(!calOpen)} className="w-full flex items-center justify-between mb-1.5">
+        <span className="font-bold text-slate-700 text-sm">⏱️ معايرة التوقيع على جهاز البصمة</span>
+        <span className="text-slate-500 text-xs font-bold">{calOpen ? '▲' : '▼'}</span>
+      </button>
+      {calOpen && (<>
+      <div className="text-center text-xs text-slate-500 mb-1">الساعة الأصلية (للعرض فقط)</div>
+      <div className="text-center text-xl font-bold font-mono mb-2" dir="ltr">{fmt(now)}</div>
+      <div className="text-center text-xs text-slate-500 mb-1">الترحيل (دقايق + ثواني)</div>
+      <div className="flex items-center justify-center gap-1 mb-2" dir="ltr">
+        <button onClick={() => setOff(-sign, absMin, absSec)} className="px-2 py-1 rounded-lg border-2 border-slate-200 bg-white font-bold" title="موجب / سالب">{sign > 0 ? '+' : '-'}</button>
+        <input type="text" inputMode="numeric" pattern="[0-9]*" value={absMin} onChange={e => setOff(sign, ar2en(e.target.value), absSec)} className="w-16 p-1.5 text-center font-bold border-2 border-slate-200 rounded-xl bg-white" dir="ltr" />
+        <span className="font-bold">:</span>
+        <input type="text" inputMode="numeric" pattern="[0-9]*" value={absSec} onChange={e => setOff(sign, absMin, ar2en(e.target.value))} className="w-16 p-1.5 text-center font-bold border-2 border-slate-200 rounded-xl bg-white" dir="ltr" />
+        <button onClick={() => setSimple('clockOffsetSec', 0)} className="px-2 py-1 rounded-lg border-2 border-slate-200 bg-white font-bold text-xs" title="تصفير">0</button>
+      </div>
+      <div className="text-center text-xs text-slate-500 mb-1">الوقت المظبوط (للعرض فقط)</div>
+      <div className="text-center text-xl font-bold font-mono text-blue-700" dir="ltr">{fmt(cal)}</div>
+      </>)}
+    </div>
+  )
+}
+
 // v12.11.5 — كارت حماية الخلفية (بند 5): حالة + مربع تفعيل + تشخيص (الكتم/الإظهار اتشال)
 function ProtectionCard({ settings, setSimple, showToast }) {
   // v12.11.22 تعديل 7: صف واحد (الحالة + تحديث + التفعيل) بدون تعليق + سطر المحجوز والتاريخ
@@ -55,10 +104,10 @@ function ProtectionCard({ settings, setSimple, showToast }) {
   }
   const lastTxt = last ? `${last.n} إشعار محجوز — ${new Date(last.t).toLocaleString('ar-EG')}` : 'لسه مفيش حجز'
   return (
-    <div className="card" style={{ padding: '10px' }}>
+    <div className="card" style={{ padding: '8px' }}>
       {/* v12.11.23 تعديل 10: الاسم جنب الرمز + التحديث سطر تحت */}
       <div className="flex items-center justify-between gap-2">
-        <span className="font-bold text-slate-700">🛡️ حماية الخلفية {enabled ? '✅' : '❌'}</span>
+        <span className="font-bold text-slate-700 text-sm">🛡️ حماية الخلفية {enabled ? '✅' : '❌'}</span>
         <label className="cursor-pointer"><input type="checkbox" checked={enabled} onChange={e => toggleEnable(e.target.checked)} className="w-5 h-5" /></label>
       </div>
       <div className="flex items-center justify-between gap-2 pt-1">
@@ -79,6 +128,21 @@ export default function Settings() {
   const [showNotif, setShowNotif] = useState(false)
   const [showFinance, setShowFinance] = useState(false)
   const [showRates, setShowRates] = useState(false)
+  // تعديل 1-4: طي كروت المالية — مغلقة افتراضيا
+  const [showBonus, setShowBonus] = useState(false)
+  const [showLunchC, setShowLunchC] = useState(false)
+  const [showRestC, setShowRestC] = useState(false)
+  const [showRound, setShowRound] = useState(false)
+  // تعديل 1-8: طي كروت الشغل والأمان والـ PDF — مغلقة افتراضيا
+  const [showSlices, setShowSlices] = useState(false)
+  const [sliceOpen, setSliceOpen] = useState({ shift1: false, shift2: false, shift3: false })
+  const [showWeekend, setShowWeekend] = useState(false)
+  const [showBal, setShowBal] = useState(false)
+  const [showBackup, setShowBackup] = useState(false)
+  const [pdfVac, setPdfVac] = useState(false)
+  const [pdfAlt, setPdfAlt] = useState(false)
+  const [pdfExtra, setPdfExtra] = useState(false)
+  const [pdfTard, setPdfTard] = useState(false)
   const [pinInput, setPinInput] = useState('')
   // تعديل ٥: قايمة الأجزاء المحمية (مربعات الصح) — تظهر فقط والحماية مفعلة
   const [pinAreasOpen, setPinAreasOpen] = useState(false)
@@ -139,6 +203,16 @@ export default function Settings() {
   const [exYear, setExYear] = useState(nowD.getFullYear())
   const [exMonth, setExMonth] = useState(nowD.getMonth() + 1)
   const [tardYear, setTardYear] = useState(nowD.getFullYear())
+  // تعديل 7 (دورة جديدة v12.15.4): تقليب الميلادية/المالية بنفس الخانة — 2026 / 2025/26
+  const _curY = nowD.getFullYear()
+  const _curF = nowD.getMonth() >= 6 ? _curY : _curY - 1
+  const _picks = []
+  for (let y = _curY; y >= 2020; y--) { _picks.push({ cal: true, y }); _picks.push({ cal: false, y: (y <= _curF ? y : _curF) }) }
+  const _seen = new Set(); const tardPicks = _picks.filter(o => { const k = (o.cal ? 'c' : 'f') + o.y; if (_seen.has(k)) return false; _seen.add(k); return true })
+  const [tardIdx, setTardIdx] = useState(0)
+  const tardPick = tardPicks[Math.max(0, Math.min(tardIdx, tardPicks.length - 1))] || { cal: true, y: _curY }
+  const tardLabel = tardPick.cal ? String(tardPick.y) : `${tardPick.y}/${String(tardPick.y + 1).slice(2)}`
+  const tardExportArg = () => tardPick.cal ? tardPick.y : { from: `${tardPick.y}-07-01`, to: `${tardPick.y + 1}-06-30` }
   const [pdfBusy, setPdfBusy] = useState(false)
   const BACKUP_DIR = Directory.Documents
   const [backupPathDisplay, setBackupPathDisplay] = useState('...جاري التحميل')
@@ -324,6 +398,30 @@ export default function Settings() {
       setBrowseOpen(false); setTimeout(() => window.location.reload(), 800)
     } catch { showToast('⚠️ الرمز غير صحيح أو ملف تالف') }
   }
+  // تعديل 1 (دورة جديدة): الشرايح العامة — تحرير settings.tardiness مباشرة
+  const tard = settings.tardiness || {
+    shift1: defaultSlicesFor((settings.shift1 && settings.shift1.start) || '08:00'),
+    shift2: defaultSlicesFor((settings.shift2 && settings.shift2.start) || '16:00'),
+    shift3: defaultSlicesFor((settings.shift3 && settings.shift3.start) || '00:00'),
+  }
+  const SLICE_LB = { shift1: 'الأولى', shift2: 'التانية', shift3: 'التالتة' }
+  const inpS = 'w-full p-2 border-2 border-slate-200 rounded-xl font-bold bg-white text-center text-sm'
+  const patchSliceG = (sh, i, key, val) => {
+    const rows = [...((tard[sh]) || [])]
+    const row = { ...rows[i], [key]: val }
+    rows[i] = row
+    if (key === 'to' && i < 3) {
+      const nxt = addMinutes(val, 1)
+      if (nxt && rows[i + 1]) rows[i + 1] = { ...rows[i + 1], from: nxt }
+    }
+    if (key === 'from' && i > 0) {
+      const prv = rows[i - 1]
+      if (prv && prv.to && val <= prv.to) { showToast && showToast('⛔ متداخل مع السطر اللي قبله'); return }
+      if (prv && prv.to && val !== addMinutes(prv.to, 1)) { showToast && showToast('⛔ لازم يبدأ بعد نهاية اللي قبله بدقيقة'); return }
+    }
+    if (key === 'to' && i < 3 && rows[i + 1] && rows[i + 1].from && val >= rows[i + 1].from) { showToast && showToast('⛔ متداخل مع السطر اللي بعده'); return }
+    save({ ...settings, tardiness: { ...tard, [sh]: rows } })
+  }
   // التعديل ٣ (دورة جديدة): استخراج الـPDF تحت حماية الرمز — نفس الرمز + مرة/جلسة + فقط عند التفعيل
   const guardedPdfExport = (kind) => request('pdf', '📄 استخراج ملفات PDF', () => doPdfExport(kind))
   // التعديل ٢٥ (دورة سادسة): استخراج ملفات PDF + فتحها
@@ -341,7 +439,7 @@ export default function Settings() {
       let res = null
       if (type === 'vac') res = await exportVacationsPdf(vacYear)
       else if (type === 'alt') res = await exportAltdaysPdf(altYear)
-      else if (type === 'tard') res = await exportTardiesPdf(tardYear)
+      else if (type === 'tard') res = await exportTardiesPdf(tardExportArg())
       else res = await exportExtraPdf(exYear, exMonth)
       const key = type === 'vac' ? 'lastPdfVac' : type === 'alt' ? 'lastPdfAlt' : type === 'tard' ? 'lastPdfTard' : 'lastPdfExtra'
       save({ ...settings, [key]: res.uri })
@@ -535,7 +633,7 @@ export default function Settings() {
       {tab === 'work' && (
         <div className="space-y-2">
           <div className="card" style={{padding:'8px'}}>
-            <h3 className="font-bold text-slate-700 mb-1.5">🕗 مواعيد العمل الرسمية</h3>
+            <h3 className="font-bold text-slate-700 text-sm mb-1.5">🕗 مواعيد العمل الرسمية</h3>
             <div className="grid grid-cols-2 gap-1">
               <div className="input-group"><label className="text-xs">حضور</label><input type="time" value={settings.officialStart||'08:00'} onChange={e=>setSimple('officialStart', e.target.value)} className="p-1.5 text-xs" /></div>
               <div className="input-group"><label className="text-xs">انصراف</label><input type="time" value={settings.officialEnd||'15:00'} onChange={e=>setSimple('officialEnd', e.target.value)} className="p-1.5 text-xs" /></div>
@@ -544,7 +642,7 @@ export default function Settings() {
           {/* v12.11.25 التعديل الأول: بره المتعلم عليه كامل زي الأصل — جوه السهم الـ3 كاملين */}
           <div className="card" style={{padding:'8px'}}>
             <button onClick={() => setShowWork(!showWork)} className="w-full flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700">🏢 نظام العمل</span>
+              <span className="font-bold text-slate-700 text-sm">🏢 نظام العمل</span>
               <span className="text-slate-500 text-xs font-bold shrink-0">{showWork ? '▲' : '▼'}</span>
             </button>
             {[
@@ -590,9 +688,18 @@ export default function Settings() {
               ))}
             </div>)}
           </div>
-          <div className="card">
-            <h3 className="font-bold text-slate-700 mb-2">🗓️ أيام الإجازة الأسبوعية</h3>
-            <div className="grid grid-cols-2 gap-3">
+          {/* تعديل 1 (دورة جديدة): كارت الورديات الخاصة المتعددة بالأسماء */}
+          <SpecialShiftCard settings={settings} onSaveList={(next) => save({ ...settings, specialShifts: next })} showToast={showToast} />
+          {/* تعديل 6 (v12.12): الكارت الكبير لمدد نظام العمل الدورية */}
+          <PeriodsCard settings={settings} onSavePeriods={(next) => save({ ...settings, tardinessPeriods: next })} showToast={showToast} />
+          {/* تعديل 3 (2 نوفمبر 2026): كارت المعايرة تحت مواعيد العمل الرسمية */}
+          <CalibrationCard settings={settings} setSimple={setSimple} />
+          <div className="card" style={{ padding: '8px' }}>
+            <button onClick={() => setShowWeekend(!showWeekend)} className="w-full flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-sm">🗓️ أيام الإجازة الأسبوعية</span>
+              <span className="text-slate-500 text-xs font-bold">{showWeekend ? '▲' : '▼'}</span>
+            </button>
+            {showWeekend && (<div className="grid grid-cols-2 gap-3 mt-2 text-xs">
               <div className="input-group">
                 <label>اليوم الأول</label>
                 <select value={weekendDays[0]} onChange={e => setSimple('weekendDays', [parseInt(e.target.value), weekendDays[1]])}
@@ -607,15 +714,45 @@ export default function Settings() {
                   {DAY_NAMES.map((n, i) => <option key={i} value={i}>{n}</option>)}
                 </select>
               </div>
-            </div>
-
+            </div>)}
           </div>
-          <div className="card">
-            <h3 className="font-bold text-slate-700 mb-2">📊 رصيد الإجازات</h3>
-            <div className="grid grid-cols-2 gap-3">
+          {/* تعديل 1 (دورة جديدة): كارت شرايح التأخيرات العام — بعد الإجازة الأسبوعية */}
+          <div className="card" style={{ padding: '8px' }}>
+            <button onClick={() => setShowSlices(!showSlices)} className="w-full flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-sm">⏰ شرايح التأخيرات</span>
+              <span className="text-slate-500 text-xs font-bold">{showSlices ? '▲' : '▼'}</span>
+            </button>
+            {showSlices && (<div className="p-1.5 rounded-lg border-2 border-blue-300 bg-blue-50 mt-1.5">
+              {['shift1', 'shift2', 'shift3'].map(sh => (
+                <div key={sh} className="mb-1.5 p-1 rounded-lg bg-white border border-slate-200">
+                  <button onClick={() => setSliceOpen({ ...sliceOpen, [sh]: !sliceOpen[sh] })} className="w-full flex items-center gap-1 font-bold text-xs text-slate-600 mb-1">
+                    <span className="shrink-0">{sliceOpen[sh] ? '▲' : '▼'}</span>
+                    <span>الوردية {SLICE_LB[sh]}</span>
+                  </button>
+                  {sliceOpen[sh] && ((tard[sh]) || []).map((r, i) => (
+                    <div key={i} className="flex items-center gap-1 mb-1 text-xs font-bold">
+                      <span className="shrink-0">من</span>
+                      <input type="time" value={r.from || ''} onChange={e => { const rows = [...tard[sh]]; rows[i] = { ...rows[i], from: e.target.value }; save({ ...settings, tardiness: { ...tard, [sh]: rows } }) }} className={inpS} style={{ maxWidth: 95 }} dir="ltr" />
+                      <span className="shrink-0">إلى</span>
+                      {i < 3 ? (
+                        <input type="time" value={r.to || ''} onChange={e => patchSliceG(sh, i, 'to', e.target.value)} className={inpS} style={{ maxWidth: 95 }} dir="ltr" />
+                      ) : (<span className={inpS} style={{ maxWidth: 95 }} dir="ltr">23:59</span>)}
+                      <span className="shrink-0 text-slate-600">{r.count === 0 ? 'استثناء' : `عدد ${r.count} تأخير`}{r.count === 3 ? ' + إذن' : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>)}
+          </div>
+          <div className="card" style={{ padding: '8px' }}>
+            <button onClick={() => setShowBal(!showBal)} className="w-full flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-sm">📊 رصيد الإجازات</span>
+              <span className="text-slate-500 text-xs font-bold">{showBal ? '▲' : '▼'}</span>
+            </button>
+            {showBal && (<div className="grid grid-cols-2 gap-3 mt-2 text-xs">
               <div className="input-group"><label>الرصيد السنوي (أيام)</label><input type="number" value={settings.annualLeaveBalance || ''} onChange={e => setSimple('annualLeaveBalance', parseInt(e.target.value) || 0)} placeholder="0" /></div>
               <div className="input-group"><label>إجازة مرضي (أيام)</label><input type="number" value={settings.sickLeaveBalance || ''} onChange={e => setSimple('sickLeaveBalance', parseInt(e.target.value) || 0)} placeholder="0" /></div>
-            </div>
+            </div>)}
           </div>
         </div>
       )}
@@ -625,35 +762,42 @@ export default function Settings() {
         <div className="space-y-2">
           <div className="card">
             <button onClick={() => setShowFinance(!showFinance)} className="w-full flex items-center justify-between">
-              <span className="font-bold text-slate-700">💰 القيم المالية</span>
+              <span className="font-bold text-slate-700 text-sm">💰 القيم المالية</span>
               <span className="text-slate-500 text-xs font-bold">{showFinance ? '▲' : '▼'}</span>
             </button>
             {showFinance && (<div className="space-y-2 mt-2">
               <div className="input-group"><label>سعر الساعة ({settings.currency})</label><input type="number" value={settings.hourlyRate || ''} onChange={e => setSimple('hourlyRate', parseFloat(e.target.value) || 0)} placeholder="100" /></div>
               <div className="input-group"><label>بدل الغداء ({settings.currency})</label><input type="number" value={settings.lunchValue || ''} onChange={e => setSimple('lunchValue', parseFloat(e.target.value) || 0)} placeholder="50" /></div>
-              {settings.bonusEnabled===true && (<div className="input-group"><label>المكافأة اليومية ({settings.currency})</label><input type="number" value={settings.bonusValue || ''} onChange={e => setSimple('bonusValue', parseFloat(e.target.value) || 0)} placeholder="100" /></div>)}
+              {/* تعديل 5: قيم فقط بلا حسبة */}
+              <div className="input-group"><label>بدل الفطار ({settings.currency})</label><input type="number" value={settings.breakfastValue || ''} onChange={e => setSimple('breakfastValue', parseFloat(e.target.value) || 0)} placeholder="0" /></div>
+              <div className="input-group"><label>بدل العشاء ({settings.currency})</label><input type="number" value={settings.dinnerValue || ''} onChange={e => setSimple('dinnerValue', parseFloat(e.target.value) || 0)} placeholder="0" /></div>
               <div className="input-group"><label>بدل التاكسي ({settings.currency})</label><input type="number" value={settings.taxiValue || ''} onChange={e => setSimple('taxiValue', parseFloat(e.target.value) || 0)} placeholder="0" /></div>
             </div>)}
           </div>
+          {/* تعديل 1: كارت المكافأة المدمج — عنوان + سهم + صف تفعيل مع الحد الأدنى + صف القيمة */}
           <div className="card">
-            {/* v12.11.23 تعديل 10: مربع صح بدل الـ toggle */}
-            {/* v12.11.24 تعديل 12: نفس حشوة كارت القيم المالية */}
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="font-bold">🎁 تفعيل المكافأة</span>
-              <input type="checkbox" checked={settings.bonusEnabled === true} onChange={e => setSimple('bonusEnabled', e.target.checked)} className="w-5 h-5" />
-            </label>
-
+            <button onClick={() => setShowBonus(!showBonus)} className="w-full flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-sm">🎁 المكافأة</span>
+              <span className="text-slate-500 text-xs font-bold">{showBonus ? '▲' : '▼'}</span>
+            </button>
+            {showBonus && (<div className="space-y-2 mt-2">
+              <div className="flex items-center gap-1.5 font-bold text-xs p-1 rounded-lg border border-slate-200 bg-white">
+                <input type="checkbox" checked={settings.bonusEnabled === true} onChange={e => setSimple('bonusEnabled', e.target.checked)} className="w-5 h-5 shrink-0" />
+                <span className="flex-1">تفعيل بحد أدنى</span>
+                <input type="number" value={settings.bonusMinHours || 7} disabled={settings.bonusEnabled !== true} onChange={e => setSimple('bonusMinHours', parseInt(e.target.value) || 7)} className="p-1.5 border-2 border-slate-200 rounded-xl font-bold bg-white text-center text-xs" style={{ maxWidth: 70, width: 70 }} dir="ltr" />
+                <span className="shrink-0 text-slate-600 text-xs font-bold text-center" style={{ minWidth: 40 }}>ساعات</span>
+              </div>
+              <div className="flex items-center gap-1.5 font-bold text-xs p-1 rounded-lg border border-slate-200 bg-white" style={settings.bonusEnabled !== true ? { opacity: 0.4 } : {}}>
+                <span className="w-5 h-5 shrink-0" />
+                <span className="flex-1">قيمة المكافأة اليومية</span>
+                <input type="number" value={settings.bonusValue || ''} disabled={settings.bonusEnabled !== true} onChange={e => setSimple('bonusValue', parseFloat(e.target.value) || 0)} placeholder="100" className="p-1.5 border-2 border-slate-200 rounded-xl font-bold bg-white text-center text-xs" style={{ maxWidth: 70, width: 70 }} dir="ltr" />
+                <span className="shrink-0 text-slate-600 text-xs font-bold text-center" style={{ minWidth: 40 }}>{settings.currency || 'ج'}</span>
+              </div>
+            </div>)}
           </div>
-          {settings.bonusEnabled===true && (<div className="card">
-            <h3 className="font-bold text-slate-700 mb-2">🎁 شروط المكافأة</h3>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-700 text-sm whitespace-nowrap">الحد الأدنى للساعات</span>
-              <input type="number" value={settings.bonusMinHours || 7} onChange={e => setSimple('bonusMinHours', parseInt(e.target.value) || 7)} className="flex-1 min-w-0 p-2 border-2 border-slate-200 rounded-xl font-bold bg-white text-center" style={{ maxWidth: 140 }} />
-            </div>
-          </div>)}
           <div className="card">
             <button onClick={() => setShowRates(!showRates)} className="w-full flex items-center justify-between">
-              <span className="font-bold text-slate-700">✖️ نسب الإضافي</span>
+              <span className="font-bold text-slate-700 text-sm">✖️ نسب الإضافي</span>
               <span className="text-slate-500 text-xs font-bold">{showRates ? '▲' : '▼'}</span>
             </button>
             {showRates && (<div className="grid grid-cols-3 gap-3 mt-2">
@@ -662,23 +806,35 @@ export default function Settings() {
               <div className="input-group"><label>العطل</label><input type="number" step="0.5" value={settings.holidayMultiplier || 2} onChange={e => setSimple('holidayMultiplier', parseFloat(e.target.value) || 2)} /></div>
             </div>)}
           </div>
+          {/* تعديل 2: طي شروط بدل الغداء */}
           <div className="card">
-            <h3 className="font-bold text-slate-700 mb-2">🍽️ شروط بدل الغداء</h3>
-            <div className="grid grid-cols-2 gap-3">
+            <button onClick={() => setShowLunchC(!showLunchC)} className="w-full flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-sm">🍽️ شروط بدل الغداء</span>
+              <span className="text-slate-500 text-xs font-bold">{showLunchC ? '▲' : '▼'}</span>
+            </button>
+            {showLunchC && (<div className="grid grid-cols-2 gap-3 mt-2">
               <div className="input-group"><label>الحد الأدنى (ساعات)</label><input type="number" value={settings.lunchMinHours || 8} onChange={e => setSimple('lunchMinHours', parseInt(e.target.value) || 8)} /></div>
               <div className="input-group"><label>بعد الساعة</label><input type="time" value={settings.lunchAfterTime || '16:31'} onChange={e => setSimple('lunchAfterTime', e.target.value)} /></div>
-            </div>
+            </div>)}
           </div>
+          {/* تعديل 3: طي بدل الراحة */}
           <div className="card">
-            <h3 className="font-bold text-slate-700 mb-2">🏖️ بدل الراحة</h3>
-            <div className="flex items-center gap-2">
+            <button onClick={() => setShowRestC(!showRestC)} className="w-full flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-sm">🏖️ بدل الراحة</span>
+              <span className="text-slate-500 text-xs font-bold">{showRestC ? '▲' : '▼'}</span>
+            </button>
+            {showRestC && (<div className="flex items-center gap-2 mt-2">
               <span className="font-bold text-slate-700 text-sm whitespace-nowrap">الحد الأدنى للساعات</span>
               <input type="number" value={settings.restDayMinHours || 6} onChange={e => setSimple('restDayMinHours', parseInt(e.target.value) || 6)} className="flex-1 min-w-0 p-2 border-2 border-slate-200 rounded-xl font-bold bg-white text-center" style={{ maxWidth: 140 }} />
-            </div>
+            </div>)}
           </div>
+          {/* تعديل 4: طي تقريب الساعات */}
           <div className="card">
-            <h3 className="font-bold text-slate-700 mb-2">🕐 تقريب الساعات</h3>
-            <div className="space-y-2">
+            <button onClick={() => setShowRound(!showRound)} className="w-full flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-sm">🕐 تقريب الساعات</span>
+              <span className="text-slate-500 text-xs font-bold">{showRound ? '▲' : '▼'}</span>
+            </button>
+            {showRound && (<div className="space-y-2 mt-2">
               {[
                 { v: 'floor', label: 'تجاهل الكسور (10:55 → 10 ساعات)' },
                 { v: 'none', label: 'بدون تقريب (10:55 تُحسب كما هي)' },
@@ -691,7 +847,7 @@ export default function Settings() {
                   <span className="font-bold text-slate-700 text-sm">{o.label}</span>
                 </button>
               ))}
-            </div>
+            </div>)}
           </div>
         </div>
       )}
@@ -852,9 +1008,12 @@ export default function Settings() {
           </div>
 
           {/* v12.9.63: لوحة الباك أب — سطرين: تصدير+استيراد / المسار+فتح(=قائمة النسخ) */}
-          <div className="card">
-            <h3 className="font-bold text-slate-700 mb-2">💾 النسخ الاحتياطي</h3>
-            <div className="space-y-1.5">
+          <div className="card" style={{ padding: '8px' }}>
+            <button onClick={() => setShowBackup(!showBackup)} className="w-full flex items-center justify-between">
+              <span className="font-bold text-slate-700 text-sm">💾 النسخ الاحتياطي</span>
+              <span className="text-slate-500 text-xs font-bold">{showBackup ? '▲' : '▼'}</span>
+            </button>
+            {showBackup && (<div className="space-y-1.5 mt-2">
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={() => request('backup', '📥 تصدير البيانات', handleBackup)} className="btn btn-primary text-xs h-[2.5rem] flex items-center justify-center">📥 تصدير البيانات</button>
                 <button onClick={() => request('backup', '📤 استيراد البيانات', handleImportLatest)} className="btn btn-outline text-xs h-[2.5rem] flex items-center justify-center">📤 استيراد البيانات</button>
@@ -865,14 +1024,19 @@ export default function Settings() {
                 </button>
                 <button onClick={() => request('backup', '📂 النسخ المحفوظة', handleBrowse)} className="btn btn-warning text-xs px-3 flex items-center justify-center h-[2.5rem]" style={{minWidth:'64px'}}>📂 فتح</button>
               </div>
-            </div>
+            </div>)}
           </div>
           {/* التعديل ٢٥ (دورة سادسة): استخراج ملفات PDF */}
-          <div className="card mt-4" style={{padding:'13px'}}>
-            <h3 className="font-bold text-slate-700 mb-2">📄 استخراج ملفات PDF</h3>
+          <div className="card mt-4" style={{padding:'8px'}}>
+            <h3 className="font-bold text-slate-700 text-sm mb-2">📄 استخراج ملفات PDF</h3>
             <div className="space-y-2">
               {/* v12.9.63: لوحة استخراج — سطرين ثابتين: [استخراج + الفترة] / [اسم الملف + فتح] */}
               <div className="border-2 border-slate-200 rounded-xl p-1.5 space-y-1.5">
+                <button onClick={() => setPdfVac(!pdfVac)} className="w-full flex items-center justify-between">
+                  <span className="font-bold text-slate-700 text-xs">📄 استخراج ملف الإجازات</span>
+                  <span className="text-slate-500 text-xs font-bold">{pdfVac ? '▲' : '▼'}</span>
+                </button>
+                {pdfVac && (<div className="space-y-1.5">
                 <div className="flex items-center gap-2">
                   <button onClick={() => guardedPdfExport('vac')} disabled={pdfBusy} className="btn btn-primary text-xs flex-1 h-[2.5rem] flex items-center justify-center">📄 استخراج ملف الإجازات</button>
                   <div className="flex items-center gap-1 shrink-0">
@@ -887,8 +1051,14 @@ export default function Settings() {
                   </button>
                   <button disabled={!settings.lastPdfVac} onClick={() => doPdfOpen(settings.lastPdfVac, 'ملف الإجازات')} className="btn btn-warning text-xs px-3 h-[2.25rem] flex items-center justify-center">📂 فتح</button>
                 </div>
+                </div>)}
               </div>
               <div className="border-2 border-slate-200 rounded-xl p-1.5 space-y-1.5">
+                <button onClick={() => setPdfAlt(!pdfAlt)} className="w-full flex items-center justify-between">
+                  <span className="font-bold text-slate-700 text-xs">📄 استخراج ملف الأيام البديلة</span>
+                  <span className="text-slate-500 text-xs font-bold">{pdfAlt ? '▲' : '▼'}</span>
+                </button>
+                {pdfAlt && (<div className="space-y-1.5">
                 <div className="flex items-center gap-2">
                   <button onClick={() => guardedPdfExport('alt')} disabled={pdfBusy} className="btn btn-primary text-xs flex-1 h-[2.5rem] flex items-center justify-center">📄 استخراج ملف الأيام البديلة</button>
                   <div className="flex items-center gap-1 shrink-0">
@@ -903,8 +1073,14 @@ export default function Settings() {
                   </button>
                   <button disabled={!settings.lastPdfAlt} onClick={() => doPdfOpen(settings.lastPdfAlt, 'ملف الأيام البديلة')} className="btn btn-warning text-xs px-3 h-[2.25rem] flex items-center justify-center">📂 فتح</button>
                 </div>
+                </div>)}
               </div>
               <div className="border-2 border-slate-200 rounded-xl p-1.5 space-y-1.5">
+                <button onClick={() => setPdfExtra(!pdfExtra)} className="w-full flex items-center justify-between">
+                  <span className="font-bold text-slate-700 text-xs">📄 استخراج ملف الإضافي</span>
+                  <span className="text-slate-500 text-xs font-bold">{pdfExtra ? '▲' : '▼'}</span>
+                </button>
+                {pdfExtra && (<div className="space-y-1.5">
                 <div className="flex items-center gap-2">
                   <button onClick={() => guardedPdfExport('extra')} disabled={pdfBusy} className="btn btn-primary text-xs flex-1 h-[2.5rem] flex items-center justify-center">📄 استخراج ملف الإضافي</button>
                   <div className="flex items-center gap-1 shrink-0">
@@ -919,14 +1095,20 @@ export default function Settings() {
                   </button>
                   <button disabled={!settings.lastPdfExtra} onClick={() => doPdfOpen(settings.lastPdfExtra, 'ملف الإضافي')} className="btn btn-warning text-xs px-3 h-[2.25rem] flex items-center justify-center">📂 فتح</button>
                 </div>
+                </div>)}
               </div>
               <div className="border-2 border-slate-200 rounded-xl p-1.5 space-y-1.5">
+                <button onClick={() => setPdfTard(!pdfTard)} className="w-full flex items-center justify-between">
+                  <span className="font-bold text-slate-700 text-xs">📄 استخراج ملف التأخيرات</span>
+                  <span className="text-slate-500 text-xs font-bold">{pdfTard ? '▲' : '▼'}</span>
+                </button>
+                {pdfTard && (<div className="space-y-1.5">
                 <div className="flex items-center gap-2">
                   <button onClick={() => guardedPdfExport('tard')} disabled={pdfBusy} className="btn btn-primary text-xs flex-1 h-[2.5rem] flex items-center justify-center">📄 استخراج ملف التأخيرات</button>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => setTardYear(y => y - 1)} className="w-8 h-8 rounded-lg border-2 border-slate-200 font-black text-slate-600">‹</button>
-                    <span className="font-black text-sm text-slate-700 w-12 text-center">{tardYear}</span>
-                    <button onClick={() => setTardYear(y => y + 1)} className="w-8 h-8 rounded-lg border-2 border-slate-200 font-black text-slate-600">›</button>
+                    <button onClick={() => setTardIdx(i => Math.min(i + 1, tardPicks.length - 1))} className="w-8 h-8 rounded-lg border-2 border-slate-200 font-black text-slate-600">‹</button>
+                    <span className="font-black text-sm text-slate-700 min-w-12 px-1 text-center">{tardLabel}</span>
+                    <button onClick={() => setTardIdx(i => Math.max(i - 1, 0))} className="w-8 h-8 rounded-lg border-2 border-slate-200 font-black text-slate-600">›</button>
                   </div>
                 </div>
                 <div className="flex gap-1.5 items-stretch">
@@ -935,6 +1117,7 @@ export default function Settings() {
                   </button>
                   <button disabled={!settings.lastPdfTard} onClick={() => doPdfOpen(settings.lastPdfTard, 'ملف التأخيرات')} className="btn btn-warning text-xs px-3 h-[2.25rem] flex items-center justify-center">📂 فتح</button>
                 </div>
+                </div>)}
               </div>
             </div>
           </div>

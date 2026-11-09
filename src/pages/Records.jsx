@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAttendance } from '../contexts/AttendanceContext'
 import { useSettings } from '../contexts/SettingsContext'
-import { getDayNameAr, timestampToTime, timestampToDateKey } from '../utils/calendar'
+import { getDayNameAr, timestampToTime, timestampToDateKey, formatOffsetLabel, calibratedNowHM } from '../utils/calendar'
 import { formatCurrency, formatHours, migrateDayType, getShiftFromRecord } from '../utils/calculations'
 import CardSelect from '../components/CardSelect'
-import { getShiftOptions, getDayStatusOptionsForDay, getDayCalcOptions, cardSelectClass, getDayCalcValue, getShiftValue, getDayStatusValue, isLeaveCalc, createDayColumnSavers, createDayGuard } from '../utils/dayColumns'
+import { getShiftOptions, getShiftOptionsFor, getDayStatusOptionsForDay, getDayCalcOptions, cardSelectClass, getDayCalcValue, getShiftValue, getDayStatusValue, isLeaveCalc, createDayColumnSavers, createDayGuard } from '../utils/dayColumns'
+import { getSpecials } from '../utils/specials'
 import TimeEditDialog from '../components/TimeEditDialog'
 import CheckOutDialog from '../components/CheckOutDialog'
 import NotesDialog from '../components/NotesDialog'
@@ -27,6 +28,10 @@ export default function Records() {
   const { settings } = useSettings()
   const navigate = useNavigate()
   const now = new Date()
+  // تعديل 3: الخانة في بوب اب التسجيل بس — التعديل يحفظ كما هو من غير ترحيل تاني
+  const offVal = Number(settings.clockOffsetSec) || 0
+  const offLblAll = formatOffsetLabel(offVal)
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [month, setMonth] = useState(() => {
     // قفزة البحث yyyymmdd (منقولة من السجلات — تُستهلك مرة واحدة)
     try {
@@ -134,6 +139,22 @@ export default function Records() {
   })
   const handleDayCalcChange = daySavers.handleDayCalcChange
   const handleShiftChange = daySavers.handleShiftChange
+  const handleSpecialChange = daySavers.handleSpecialChange
+  // تعديل 1: خانة الوردية الواحدة + القايمة المتسلسلة للخاصة بالاسم (بدل خانتين)
+  const renderShiftCell = (d, hMode, isOff, dropPrefix) => {
+    const spList = getSpecials(settings)
+    const rec = d.record || d
+    const drill = spList.length > 0 ? {
+      matchValue: 'shiftX',
+      options: spList.map(s => ({ value: s.id, label: s.name || 'بدون اسم' })),
+      value: rec.specialId || spList[0].id,
+      onPick: v => guardRecord(d.dk, () => handleSpecialChange(d.dk, v), 'special'),
+      backLabel: '‹ الوردية',
+    } : null
+    return (
+      <CardSelect btnClass={cardSelectClass('shift',getShiftValue(d),hMode)} options={getShiftOptionsFor(settings, rec, getShiftValue(d))} value={getShiftValue(d)} onPick={v=>guardRecord(d.dk,()=>handleShiftChange(d.dk,v),'shift')} disabled={isOff || planLocked(d.dk)} dropKey={dropPrefix+':sh'} openKey={openDrop} setOpenKey={setOpenDrop} drill={drill} />
+    )
+  }
   const handleDayStatusChange = daySavers.handleDayStatusChange
   const handleSpecialSave = () => {
     if (daySavers.saveSpecial(specialDialog.date, specialDialog.name)) setSpecialDialog({ open:false, date:null, name:'' })
@@ -188,7 +209,7 @@ export default function Records() {
     const isAltDay = d.dayStatus === 'alt_day'
     if (key === 'dayCalc') return <CardSelect btnClass={cardSelectClass('dayCalc',getDayCalcValue(d),hMode)} options={getDayCalcOptions(d.isWeekend,d.dayStatus)} value={getDayCalcValue(d)} onPick={v=>guardRecord(d.dk,()=>handleDayCalcChange(d.dk,v),'dayCalc')} disabled={planLocked(d.dk)} dropKey={'t'+d.dk+':dc'} openKey={openDrop} setOpenKey={setOpenDrop} />
     if (key === 'dayStatus') return <CardSelect btnClass={cardSelectClass('dayStatus',getDayStatusValue(d),hMode)} options={getDayStatusOptionsForDay(d.isWeekend,d.dayStatus)} value={getDayStatusValue(d)} onPick={v=>guardRecord(d.dk,()=>handleDayStatusChange(d.dk,v),'dayStatus')} disabled={isOff || planLocked(d.dk)} dropKey={'t'+d.dk+':ds'} openKey={openDrop} setOpenKey={setOpenDrop} />
-    if (key === 'shift') return <CardSelect btnClass={cardSelectClass('shift',getShiftValue(d),hMode)} options={getShiftOptions(getShiftValue(d))} value={getShiftValue(d)} onPick={v=>guardRecord(d.dk,()=>handleShiftChange(d.dk,v),'shift')} disabled={isOff || planLocked(d.dk)} dropKey={'t'+d.dk+':sh'} openKey={openDrop} setOpenKey={setOpenDrop} />
+    if (key === 'shift') return renderShiftCell(d, hMode, isOff, 't'+d.dk)
     if (key === 'checkIn') return isLeaveCalc(getDayCalcValue(d)) ? <span className="text-slate-400">—</span> : <button disabled={isOff || planLocked(d.dk)} onClick={()=>{const fn=()=>setTimeDialog({open:true,date:d.dk,field:'checkIn'}); if(d.record?.checkIn) guardRecord(d.dk,fn,'checkIn'); else fn()}} className={`font-bold ${isOff?'text-slate-400':'text-black'}`}>{d.record?.checkIn?timestampToTime(d.record.checkIn):'تسجيل'} ▼</button>
     if (key === 'checkOut') return isLeaveCalc(getDayCalcValue(d)) ? <span className="text-slate-400">—</span> : <button disabled={isOff || planLocked(d.dk)} onClick={()=>{const fn=()=>setTimeDialog({open:true,date:d.dk,field:'checkOut'}); if(d.record?.checkOut) guardRecord(d.dk,fn,'checkOut'); else fn()}} className={`font-bold ${isOff?'text-slate-400':'text-black'}`}>{d.record?.checkOut?timestampToTime(d.record.checkOut):'تسجيل'} ▼</button>
     if (key === 'hours') return <span className={`font-bold text-xs ${isAltDay?'text-slate-400':'text-blue-700'}`}>{displayCell(d,'hours')}</span>
@@ -340,7 +361,8 @@ export default function Records() {
       {timeDialog.field === 'checkOut' ? (
         <CheckOutDialog open={timeDialog.open}
           title="⏰ وقت الانصراف"
-          currentTime={timeDialog.date && records[timeDialog.date] ? timestampToTime(records[timeDialog.date]?.checkOut) : '08:00'}
+          offsetLabel={(timeDialog.date && records[timeDialog.date] && records[timeDialog.date]?.checkOut) ? '' : offLblAll}
+          currentTime={timeDialog.date && records[timeDialog.date] && records[timeDialog.date]?.checkOut ? timestampToTime(records[timeDialog.date]?.checkOut) : (timeDialog.date === todayStr ? calibratedNowHM(offVal) : '08:00')}
           currentDate={timeDialog.date && records[timeDialog.date]?.checkOut ? timestampToDateKey(records[timeDialog.date].checkOut) : timeDialog.date}
           checkInTime={timeDialog.date && records[timeDialog.date]?.checkIn ? timestampToTime(records[timeDialog.date].checkIn) : undefined}
           showDate={timeDialog.date && records[timeDialog.date] ? (records[timeDialog.date].shift === 'shift2' || records[timeDialog.date].dayType === 'shift2') : false}
@@ -358,7 +380,8 @@ export default function Records() {
       ) : (
       <TimeEditDialog open={timeDialog.open}
         title="⏰ وقت الحضور"
-        currentTime={timeDialog.date && records[timeDialog.date] ? timestampToTime(records[timeDialog.date]?.checkIn) : '08:00'}
+        offsetLabel={(timeDialog.date && records[timeDialog.date] && records[timeDialog.date]?.checkIn) ? '' : offLblAll}
+        currentTime={timeDialog.date && records[timeDialog.date] && records[timeDialog.date]?.checkIn ? timestampToTime(records[timeDialog.date]?.checkIn) : (timeDialog.date === todayStr ? calibratedNowHM(offVal) : '08:00')}
         hasTime={timeDialog.date && records[timeDialog.date] ? !!records[timeDialog.date]?.checkIn : false}
         onSave={(time) => {
           editCheckIn(timeDialog.date, time)

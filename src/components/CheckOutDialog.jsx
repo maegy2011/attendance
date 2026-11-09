@@ -8,7 +8,7 @@ function todayKey() {
 // شاشة تسجيل/تعديل الانصراف
 // - حقل التاريخ بيظهر تلقائيًا لو الوقت المدخل قبل وقت الحضور (يعني بعد منتصف الليل)
 // - أو لو الوردية تانية (showDate) — المستخدم يقدر يعدل التاريخ يدويًا
-export default function CheckOutDialog({ open, onClose, onSave, title = 'تسجيل الانصراف', currentTime, currentDate, checkInTime, showDate, hasTime, onDelete }) {
+export default function CheckOutDialog({ open, onClose, onSave, title = 'تسجيل الانصراف', currentTime, currentDate, checkInTime, showDate, hasTime, onDelete, offsetLabel }) {
   const [time, setTime] = useState(currentTime || '00:00')
   const [date, setDate] = useState(currentDate || todayKey())
   const [confirming, setConfirming] = useState(false)
@@ -45,7 +45,13 @@ export default function CheckOutDialog({ open, onClose, onSave, title = 'تسج�
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog-box" onClick={e => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-center mb-4">{title}</h3>
+        <div className="flex items-center justify-center gap-2 mb-4 flex-wrap">
+          <h3 className="text-lg font-bold text-center">{title}</h3>
+          {/* تعديل 1 (v12.12): خانة الترحيل جنب العنوان في نفس السطر متسنترة */}
+          {offsetLabel ? (
+            <span className="px-3 py-1.5 text-center text-sm font-bold border-2 border-blue-200 rounded-xl bg-blue-50 text-blue-700" dir="ltr">{offsetLabel}</span>
+          ) : null}
+        </div>
         <input type="time" value={time} onChange={e => { setTime(e.target.value); setConfirming(false) }}
           className="w-full p-3 text-center text-xl font-bold border-2 border-blue-200 rounded-xl focus:border-blue-500 outline-none mb-4" dir="ltr" />
 

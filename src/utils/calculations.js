@@ -1,4 +1,6 @@
 import { isHoliday } from './calendar'
+import { resolvePeriodSettings } from './periods'
+import { getSpecialForRecord } from './specials'
 
 // تحويل dayType القديم للحقول الثلاثة الجديدة (مهاجرة تلقائية)
 function migrateDayType(oldDayType) {
@@ -100,6 +102,9 @@ export function calculateDay(record, settings) {
   if (!dayType) return null
   const checkIn = new Date(record.checkIn)
   const checkOut = record.checkOut ? new Date(record.checkOut) : null
+  // تعديل 6 (v12.12): دمج إعدادات المدة الدورية حسب تاريخ اليوم فوق الافتراضي
+  const _dk = `${checkIn.getFullYear()}-${String(checkIn.getMonth() + 1).padStart(2, '0')}-${String(checkIn.getDate()).padStart(2, '0')}`
+  settings = resolvePeriodSettings(settings, _dk)
   const roundingMode = settings.hourRounding || 'floor'
   const rawTotalHours = checkOut ? ((checkOut - checkIn) / 3600000) : 0
   const totalHours = roundHours(rawTotalHours, roundingMode)
@@ -116,6 +121,8 @@ export function calculateDay(record, settings) {
   const isHolidayStatus = dayStatusVal === 'overtime_holiday' || dayType === 'overtime_holiday'
   const isWeekendOvertimeStatus = dayStatusVal === 'weekend_overtime' || dayType === 'weekend_overtime'
   let overtimeHours = 0, overtimeMultiplier = 0
+  // تعديل 7 (v12.12): بدلات الوردية الخاصة المستقلة — تُحسب في فرعها وتغطي العامة
+  let spLunch = null, spBonus = null, spTaxi = null
 
   // القاعدة العامة: أي تركيبة في آخرها "لا يوجد تكليف" = صفر كامل (ساعات + مكافأة + غدا + تاكسي)
   if (shiftVal === 'no_task' || dayType === 'no_task') {
@@ -236,7 +243,19 @@ export function calculateDay(record, settings) {
     else overtimeMultiplier = settings.holidayMultiplier || 2
     overtimeHours = totalHours * overtimeMultiplier
   }
-  // الوردية الأولى: الأحد-الخميس = إضافي بعد موعد الانصراف، الجمعة/السبت/العطلة = مضاعف
+  // تعديل 1 (دورة جديدة): الوردية الخاصة المختارة للسجل — فاكتور على الباقي بعد الخصم الاختياري
+  else if (dayType === 'shiftX') {
+    const sp = getSpecialForRecord(settings, record) || {}
+    const spanH = checkOut ? (checkOut - checkIn) / 3600000 : 0
+    const factor = Number(sp.otFactor) > 0 ? Number(sp.otFactor) : 1
+    const ded = sp.deductOn ? (Number(sp.deductHours) || 0) : 0
+    overtimeMultiplier = factor
+    overtimeHours = Math.max(0, roundHours(spanH - ded, roundingMode)) * factor
+    spLunch = (sp.lunchOn && spanH >= (Number(sp.lunchHours) || 0)) ? (sp.lunchValue !== undefined ? sp.lunchValue : (settings.lunchValue || 0)) : 0
+    spBonus = (sp.bonusOn && spanH >= (Number(sp.bonusHours) || 0)) ? (settings.bonusValue || 0) : 0
+    spTaxi = (sp.taxiOn && spanH >= (Number(sp.taxiHours) || 0)) ? (settings.taxiValue || 0) : 0
+  }
+  // الوردية الأولى: الأحد-الخميس = تعديل 4 (v12.12): (الانصراف - الحضور) - 8 ساعات — السالب صفر
   else if (dayType === 'shift1') {
     if (isWeekendOrHoliday) {
       if (dayOfWeek === firstWeekend || isHoliday(checkIn)) overtimeMultiplier = settings.fridayMultiplier || 2
@@ -244,11 +263,10 @@ export function calculateDay(record, settings) {
       else overtimeMultiplier = settings.holidayMultiplier || 2
       overtimeHours = totalHours * overtimeMultiplier
     } else {
-      // الوردية الأولى: الإضافي على الساعات بعد الساعة 4 عصراً (16:00) — منفصل عن shift1.end المستخدم للإشعار
-      const [endH, endM] = '16:00'.split(':').map(Number)
+      // تعديل 4 (v12.12): الوردية الأولى أحد-خميس = (الانصراف - الحضور) - 8 ساعات — السالب صفر
       if (checkOut) {
-        const coMin = checkOut.getHours() * 60 + checkOut.getMinutes()
-        overtimeHours = Math.max(0, roundHours((coMin - (endH * 60 + endM)) / 60, roundingMode))
+        const spanH = (checkOut - checkIn) / 3600000
+        overtimeHours = Math.max(0, roundHours(spanH - 8, roundingMode))
       }
     }
   }
@@ -272,19 +290,19 @@ export function calculateDay(record, settings) {
     else overtimeMultiplier = settings.holidayMultiplier || 2
     overtimeHours = totalHours * overtimeMultiplier
   }
-  // أيام العمل العادية (بدون نوع محدد صراحةً) — تُعامل كوردية أولى: إضافي بعد 16:00
+  // أيام العمل العادية (بدون نوع محدد صراحةً) — تُعامل كوردية أولى: تعديل 4 (الفرق - 8)
   else {
-    const [endH, endM] = '16:00'.split(':').map(Number)
     if (checkOut) {
-      const coMin = checkOut.getHours() * 60 + checkOut.getMinutes()
-      overtimeHours = Math.max(0, roundHours((coMin - (endH * 60 + endM)) / 60, roundingMode))
+      const spanH = (checkOut - checkIn) / 3600000
+      overtimeHours = Math.max(0, roundHours(spanH - 8, roundingMode))
     }
   }
 
   const overtimeValue = Math.round(overtimeHours * (settings.hourlyRate || 0))
-  const lunchValue = calcLunch(shiftVal, checkOut, totalHours, settings)
-  const bonusValue = calcBonus(totalHours, isWeekendOrHoliday, isHolidayStatus, isWeekendOvertimeStatus, settings)
-  const taxiValue = calcTaxi(record, checkIn, checkOut, settings)
+  // تعديل 7 (v12.12): الوردية الخاصة تستخدم بدلاتها المستقلة
+  const lunchValue = dayType === 'shiftX' && spLunch !== null ? spLunch : calcLunch(shiftVal, checkOut, totalHours, settings)
+  const bonusValue = dayType === 'shiftX' && spBonus !== null ? spBonus : calcBonus(totalHours, isWeekendOrHoliday, isHolidayStatus, isWeekendOvertimeStatus, settings)
+  const taxiValue = dayType === 'shiftX' && spTaxi !== null ? spTaxi : calcTaxi(record, checkIn, checkOut, settings)
 
   // مجموع الإضافي = أجر الساعات الإضافية + بدل الغداء (بدون أجر أساسي)
   const totalExtras = overtimeValue + lunchValue

@@ -1,8 +1,9 @@
 import { getLeavesV2, getAltDays, getPermitsV2 } from './storage'
+import { findPeriodForDate } from './periods'
 import { getPlan, planProgress } from './planWeek'
 import { getTardinessCount, hasLatePermit } from './tardiness'
 import { calculateMonthly, getShiftFromRecord } from './calculations'
-import { parseTimeToMin } from './permits'
+import { getSpecialForRecord } from './specials'
 
 // التعديل ٤+٥: الجرس الشامل — 12 بندًا (1+4+5+6 صادقة + 7-15 مضافة) — 2 الرصيد + 3 البديلة محذوفتان
 const READ_KEY = 'att_read_notices'
@@ -56,14 +57,17 @@ export function buildNotices(records, settings) {
   const todayRec = recs[tk] || {}
   const hasIn = !!todayRec.checkIn, hasOut = !!todayRec.checkOut
   let dc = todayRec.dayCalculation || todayRec.dayType || ''
-  if (dc === 'shift1' || dc === 'shift2' || dc === 'shift3' || dc === 'no_task') dc = ''
+  if (dc === 'shift1' || dc === 'shift2' || dc === 'shift3' || dc === 'shiftX' || dc === 'no_task') dc = ''
   const isPresentDay = (dc === '' || dc === 'present')
   let shiftRaw = todayRec.shift || ''
-  if (!shiftRaw && ['shift1', 'shift2', 'shift3', 'no_task'].includes(todayRec.dayType)) shiftRaw = todayRec.dayType
+  if (!shiftRaw && ['shift1', 'shift2', 'shift3', 'shiftX', 'no_task'].includes(todayRec.dayType)) shiftRaw = todayRec.dayType
   const offStart = S.officialStart || '08:00', offEnd = S.officialEnd || '15:00'
-  const startStr = ['shift1', 'shift2', 'shift3'].includes(shiftRaw) ? ((S[shiftRaw] && S[shiftRaw].start) || '08:00') : (shiftRaw === 'no_task' ? offStart : null)
-  const endStr = ['shift1', 'shift2', 'shift3'].includes(shiftRaw) ? ((S[shiftRaw] && S[shiftRaw].end) || '17:00') : (shiftRaw === 'no_task' ? offEnd : null)
-  const sLabel = ['shift1', 'shift2', 'shift3'].includes(shiftRaw) ? ({ shift1: 'الأولى', shift2: 'الثانية', shift3: 'الثالثة' }[shiftRaw]) : (shiftRaw === 'no_task' ? 'الرسمية' : '')
+  // تعديل 1 (دورة جديدة): الخاصة المختارة ليوم النهاردة — الأولى افتراضي
+  const spToday = getSpecialForRecord(S, todayRec) || {}
+  const spS = spToday.start || '08:00', spE = spToday.end || '17:00', spN = spToday.name || 'الخاصة'
+  const startStr = ['shift1', 'shift2', 'shift3'].includes(shiftRaw) ? ((S[shiftRaw] && S[shiftRaw].start) || '08:00') : (shiftRaw === 'shiftX' ? spS : (shiftRaw === 'no_task' ? offStart : null))
+  const endStr = ['shift1', 'shift2', 'shift3'].includes(shiftRaw) ? ((S[shiftRaw] && S[shiftRaw].end) || '17:00') : (shiftRaw === 'shiftX' ? spE : (shiftRaw === 'no_task' ? offEnd : null))
+  const sLabel = ['shift1', 'shift2', 'shift3'].includes(shiftRaw) ? ({ shift1: 'الأولى', shift2: 'الثانية', shift3: 'الثالثة' }[shiftRaw]) : (shiftRaw === 'shiftX' ? spN : (shiftRaw === 'no_task' ? 'الرسمية' : ''))
 
   // B1 — حضور / انصراف / نسيت الحضور / نسيت الانصراف (النهاردة)
   try {
@@ -150,6 +154,12 @@ export function buildNotices(records, settings) {
       for (const p of permits) { if (p?.type === 'special' && String(p.date || '').startsWith(ym)) sp++ }
       out.push({ id: `wk-${ym}`, icon: '📊', text: `إضافي: ${otH} ساعة (${otPay} جنيه) | مكافأة: ${bonusDays} | تأخيرات: ${tc} | متجاهلة: ${ign} | تصاريح خاصة: ${sp}`, sub: 'تقرير الأحد 11ص', route: '/stats' })
     }
+  } catch {}
+  // تعديل 6 (v12.12): بانر تسجيل نظام العمل السنوي — يظهر لما النهاردة مش داخل في أي مدة
+  try {
+    const _n = new Date()
+    const _dk = `${_n.getFullYear()}-${String(_n.getMonth() + 1).padStart(2, '0')}-${String(_n.getDate()).padStart(2, '0')}`
+    if (!findPeriodForDate(S, _dk)) out.push({ id: 'period-reg', icon: '🏭', text: 'مطلوب تسجيل نظام العمل السنوي — اضغط للتسجيل', sub: '', route: '/settings' })
   } catch {}
   // عيد الميلاد — دايمًا شغال
   try {

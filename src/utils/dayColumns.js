@@ -3,6 +3,7 @@
 // منقولة من Records.jsx بالنص — القوايم + الألوان + القيم + الحفظ + البوابة
 
 import { checkRestDayAvailability } from './leaveCounts'
+import { getSpecials, getSpecialName } from './specials'
 import { isPinOn } from '../hooks/usePinArea'
 
 export const SHIFT_OPTIONS = [
@@ -10,6 +11,8 @@ export const SHIFT_OPTIONS = [
   { value: 'shift1', label: 'وردية أولى' },
   { value: 'shift2', label: 'وردية تانية' },
   { value: 'shift3', label: 'وردية تالتة' },
+  // تعديل 7 (v12.12): الوردية الخاصة
+  { value: 'shiftX', label: 'وردية خاصة' },
 ]
 
 // بند 2: الاختيار الفاضي (-) — يظهر فقط للأيام اللي لسه متسددتش، ويختفي بعد التسديد
@@ -21,6 +24,16 @@ export const EMPTY_OPT = { value: '', label: '—' }
 export const getShiftOptions = (currentValue) => {
   if (!currentValue) return [EMPTY_OPT, ...SHIFT_OPTIONS]
   return SHIFT_OPTIONS
+}
+
+// تعديل 1: خيارات الوردية مع اسم الخاصة المختارة للسجل (العرض مقصوص تلقائيا بالـ truncate)
+export const getShiftOptionsFor = (settings, rec, currentValue) => {
+  const base = getShiftOptions(currentValue)
+  if (rec && rec.shift === 'shiftX') {
+    const nm = getSpecialName(settings, rec)
+    return base.map(o => o.value === 'shiftX' ? { ...o, label: `خاصة: ${nm}` } : o)
+  }
+  return base
 }
 
 // خيارات عمود "حاله اليوم" حسب اليوم — بند 2: الفاضي (-) افتراضي ويختفي بعد التسديد
@@ -176,12 +189,31 @@ export const createDayColumnSavers = (deps) => {
 
   const handleShiftChange = (dk, value) => {
     if (value === '') {
-      updateRecordFields(dk, { shift: '' })
+      updateRecordFields(dk, { shift: '', specialId: '' })
       showToast('🗑️ تم مسح الورديه')
       return
     }
-    updateRecordFields(dk, { shift: value, dayType: value })
+    // تعديل 1: اختيار خاصة يثبت أول معرف (أو الموجود) — الاختيار التفصيلي من القايمة الفرعية
+    if (value === 'shiftX') {
+      const settings = getSettings() || {}
+      const records = getRecords() || {}
+      const rec = records[dk] || {}
+      const first = getSpecials(settings)[0]
+      // تعديل 1: بلا خاصة مسجلة — توجيه للإعدادات بدل الحفظ الفاضي
+      if (!first) { showToast('سجل وردية خاصة الأول من الإعدادات'); return }
+      const sid = rec.specialId || (first && first.id) || ''
+      updateRecordFields(dk, { shift: 'shiftX', dayType: 'shiftX', specialId: sid })
+      showToast(`✅ تم تعيين الورديه: ${sid ? getSpecialName(settings, { specialId: sid }) : 'وردية خاصة'}`)
+      return
+    }
+    updateRecordFields(dk, { shift: value, dayType: value, specialId: '' })
     showToast(`✅ تم تعيين الورديه: ${SHIFT_OPTIONS.find(o => o.value === value)?.label || value}`)
+  }
+
+  // تعديل 1: اختيار الخاصة بالاسم من القايمة الفرعية
+  const handleSpecialChange = (dk, id) => {
+    updateRecordFields(dk, { specialId: id })
+    try { showToast(`✅ الخاصة: ${getSpecialName(getSettings() || {}, { specialId: id })}`) } catch {}
   }
 
   const handleDayStatusChange = (dk, value) => {
@@ -210,5 +242,5 @@ export const createDayColumnSavers = (deps) => {
     return true
   }
 
-  return { handleDayCalcChange, handleShiftChange, handleDayStatusChange, saveSpecial }
+  return { handleDayCalcChange, handleShiftChange, handleSpecialChange, handleDayStatusChange, saveSpecial }
 }

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAttendance } from '../contexts/AttendanceContext'
 import { useSettings } from '../contexts/SettingsContext'
-import { timestampToTime, timestampToDateKey, formatDateAr, getDayNameAr } from '../utils/calendar'
+import { timestampToTime, timestampToDateKey, formatDateAr, getDayNameAr, formatOffsetLabel, calibratedNowHM } from '../utils/calendar'
 import { formatCurrency } from '../utils/calculations'
 import TimeEditDialog from '../components/TimeEditDialog'
 import CheckOutDialog from '../components/CheckOutDialog'
@@ -20,10 +20,11 @@ import ConfirmDialog from '../components/ConfirmDialog'
 import PinGate from '../components/PinGate'
 import CardSelect from '../components/CardSelect'
 import { usePinArea } from '../hooks/usePinArea'
-import { getShiftOptions, getDayStatusOptionsForDay, getDayCalcOptions, getDayCalcValue, getShiftValue, getDayStatusValue, isLeaveCalc, createDayColumnSavers, createDayGuard } from '../utils/dayColumns'
+import { getShiftOptions, getShiftOptionsFor, getDayStatusOptionsForDay, getDayCalcOptions, getDayCalcValue, getShiftValue, getDayStatusValue, isLeaveCalc, createDayColumnSavers, createDayGuard } from '../utils/dayColumns'
 import { formatDateAr as formatDateArVac } from '../utils/vacationLogic'
 import { getPermitsV2, savePermitsV2 } from '../utils/storage'
 import { getRawLateMin, getTardinessCount, hasLatePermit } from '../utils/tardiness'
+import { getSpecialForRecord, getSpecials, getSpecialName } from '../utils/specials'
 import { calcPermitDuration } from '../utils/permits'
 import { WaAskDialog } from '../components/WaAskDialog'
 import { LEAVE_LABELS, buildLeaveText, buildAltText, checkAltEligible, shareWa } from '../utils/waShare'
@@ -47,13 +48,17 @@ const LEAVE_TYPES = ['regular_vacation', 'rest_day', 'weekend_rest', 'sick', 'un
 export default function HomeNew() {
   const { records, todayRecord, todayKey, checkIn, checkOut, editCheckIn, editCheckOut, getDayCalc, showToast, saveNotes, deleteTime, getLeaveBalances, updateRecordFields, findPendingCheckOut } = useAttendance()
   const { settings } = useSettings()
+  // تعديل 3: الترحيل مرة واحدة ساعة التسجيل الجديد — التعديل يحفظ كما هو
+  const offVal = Number(settings.clockOffsetSec) || 0
+  const offLblAll = formatOffsetLabel(offVal)
   const navigate = useNavigate()
 
   const [now, setNow] = useState(new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t) }, [])
   const pf = settings.profile || {}
   const greet = now.getHours() < 12 ? 'صباح الخير' : 'مساء الخير'
-  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+  // تعديل 2 (v12.12): ساعة الكارت الأزرق بالوقت المظبوط (الأصلي + الترحيل)
+  const timeStr = new Date(now.getTime() + offVal * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
   const dateStr = formatDateAr(now)
   const dayName = getDayNameAr(now)
   const sunMoon = now.getHours() < 12 ? '☀️' : '🌙'
@@ -61,6 +66,8 @@ export default function HomeNew() {
   // dialogs + savers (نفس مسار Home/Sجلات — dayColumns)
   const [editDialog, setEditDialog] = useState({ open: false, type: null })
   const [checkOutDlg, setCheckOutDlg] = useState({ open: false, time: '00:00', date: null })
+  // تعديل 1 (v12.12): بوب اب تسجيل الحضور السريع بدل الدوسة الواحدة
+  const [quickInDlg, setQuickInDlg] = useState({ open: false, time: '00:00' })
   const [notesDialog, setNotesDialog] = useState({ open: false })
   const [yearNotesOpen, setYearNotesOpen] = useState(false) // v12.11.26 (8)
   const [confirmDialog, setConfirmDialog] = useState({ open: false, type: null })
@@ -120,13 +127,13 @@ export default function HomeNew() {
   const hasBlockingPermit = !!(blockingPermit && (blockingPermit.type === 'special' || blockingPermit.type === 'errand' || blockingPermit.type === 'official_mission') && blockingPermit.state === 'no_return')
 
   const handleManualCheckIn = () => {
-    const n = new Date()
-    checkIn(`${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`)
+    // تعديل 1 (v12.12): التسجيل السريع بقى بوب اب — يفتح متعبي بالوقت المظبوط
+    setQuickInDlg({ open: true, time: calibratedNowHM(offVal) })
   }
   const handleManualCheckOut = () => {
     const n = new Date()
     const dk = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
-    const t = `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`
+    const t = calibratedNowHM(offVal)
     setCheckOutDlg({ open: true, time: t, date: dk })
   }
 
@@ -264,11 +271,19 @@ export default function HomeNew() {
       const sunThu = dow >= 0 && dow <= 4
       if (statusVal === 'normal_day' && sunThu) {
         if (shiftVal === 'shift1') {
-          const start = new Date(ciDate); start.setHours(16, 0, 0, 0)
-          return Math.max(0, (atMs - start.getTime()) / 60000)
+          // تعديل 4 (v12.12): العداد اللحظي زي الحسبة — الفرق ناقص 8 ساعات
+          return Math.max(0, (atMs - ciDate.getTime()) / 60000 - 8 * 60)
         }
         if (shiftVal === 'shift2' || shiftVal === 'shift3') {
           return Math.max(0, (atMs - ciDate.getTime()) / 60000 - 7 * 60)
+        }
+        // تعديل 1 (دورة جديدة): العداد اللحظي للخاصة المختارة في اليوم
+        if (shiftVal === 'shiftX') {
+          const sp = getSpecialForRecord(settings, tRow) || {}
+          const factor = Number(sp.otFactor) > 0 ? Number(sp.otFactor) : 1
+          const ded = sp.deductOn ? (Number(sp.deductHours) || 0) * 60 : 0
+          const spanMin = Math.max(0, (atMs - ciDate.getTime()) / 60000)
+          return Math.max(0, spanMin - ded) * factor
         }
         return 0
       }
@@ -481,7 +496,7 @@ export default function HomeNew() {
         <div className="claw-cell" onClick={fwdCell}>
           <span className="claw-cellicon">🕐</span>
           <span className="claw-cellabel">الوردية</span>
-          <CardSelect btnClass={'claw-pick' + (getShiftValue(tRow) ? '' : ' claw-empty')} options={split2(getShiftOptions(getShiftValue(tRow)))} value={getShiftValue(tRow)} disabled={tOff || homeLocked} onPick={v => guardHome(() => daySavers.handleShiftChange(todayKey, v), 'shift')} dropKey="new:sh" openKey={openDrop} setOpenKey={setOpenDrop} />
+          <CardSelect btnClass={'claw-pick' + (getShiftValue(tRow) ? '' : ' claw-empty')} options={split2(getShiftOptionsFor(settings, tRec, getShiftValue(tRow)))} value={getShiftValue(tRow)} disabled={tOff || homeLocked} onPick={v => guardHome(() => daySavers.handleShiftChange(todayKey, v), 'shift')} dropKey="new:sh" openKey={openDrop} setOpenKey={setOpenDrop} drill={getSpecials(settings).length > 0 ? { matchValue: 'shiftX', options: getSpecials(settings).map(s => ({ value: s.id, label: s.name || 'بدون اسم' })), value: tRec.specialId || getSpecials(settings)[0].id, onPick: v => guardHome(() => daySavers.handleSpecialChange(todayKey, v), 'special'), backLabel: '‹ الوردية' } : null} />
         </div>
         {cellLunch && (<div className={'claw-cell ' + (cellLunch.fin ? 'claw-final' : 'claw-provis')} onClick={() => { navigate('/stats'); try { window.scrollTo(0, 0) } catch {} }}><span className="claw-cellicon">🍽️</span><span className="claw-cellabel">بدل الغدا</span></div>)}
         {cellAlt && (<div className={'claw-cell ' + (cellAlt.fin ? 'claw-final' : 'claw-provis')} onClick={() => { navigate('/alt-days'); try { window.scrollTo(0, 0) } catch {} }}><span className="claw-cellicon">🔄</span><span className="claw-cellabel">يوم بديل</span></div>)}
@@ -602,7 +617,12 @@ export default function HomeNew() {
         currentTime={timestampToTime(activeRecord?.checkIn)} hasTime={!!activeRecord?.checkIn}
         onDelete={() => deleteTime(activeKey, 'checkIn')} onSave={(time) => { editCheckIn(activeKey, time) }}
         onClose={() => setEditDialog({ open: false, type: null })} />
-      <CheckOutDialog open={checkOutDlg.open} title="🚶 تسجيل الانصراف" currentTime={checkOutDlg.time} currentDate={checkOutDlg.date}
+      {/* تعديل 1 (v12.12): بوب اب تسجيل الحضور السريع — متعبي بالمظبوط + خانة الترحيل */}
+      <TimeEditDialog open={quickInDlg.open} title="تسجيل الحضور" offsetLabel={offLblAll}
+        currentTime={quickInDlg.time} hasTime={false}
+        onSave={(time) => { checkIn(time); setQuickInDlg({ open: false, time: '00:00' }) }}
+        onClose={() => setQuickInDlg({ open: false, time: '00:00' })} />
+      <CheckOutDialog open={checkOutDlg.open} title="🚶 تسجيل الانصراف" offsetLabel={offLblAll} currentTime={checkOutDlg.time} currentDate={checkOutDlg.date}
         checkInTime={activeRecord?.checkIn ? timestampToTime(activeRecord.checkIn) : undefined}
         showDate={getEffectiveDayType(activeRecord) === 'shift2'}
         onSave={(time, date) => { checkOut(time, date); setPendingAlt(date || todayKey) }}

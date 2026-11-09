@@ -10,6 +10,7 @@ import { getDisplayAltDays, getAltStats } from './altDays'
 import { getLeaveCounts } from './leaveCounts'
 import { calculateDay } from './calculations'
 import { getTardinessCount } from './tardiness'
+import { getSpecialName } from './specials'
 import { SHIFT_OPTIONS, DAY_STATUS_OPTIONS } from './dayColumns'
 import { timestampToTime } from './calendar'
 import { firstName } from './firstName'
@@ -189,7 +190,7 @@ export async function exportExtraPdf(year, month) {
     let to = '—'
     try { to = timestampToTime(rec.checkOut) || '—' } catch { to = '—' }
     rows.push([ar(rec.notes || '—'), ar(taxi || '—'), ar(bonus || '—'), ar(tot), ar(lunch || '—'), ar(cash), ar(r2(h)),
-      ar(to), ar(tm), ar(slotLabel(SHIFT_OPTIONS, rec.shift, '—')), ar(slotLabel(DAY_STATUS_OPTIONS, rec.dayStatus, '—')), ar(dk)])
+      ar(to), ar(tm), ar(rec.shift === 'shiftX' ? getSpecialName(settings, rec) : slotLabel(SHIFT_OPTIONS, rec.shift, '—')), ar(slotLabel(DAY_STATUS_OPTIONS, rec.dayStatus, '—')), ar(dk)])
   }
   const doc = newDoc()
   const userName = firstName(settings.profile && settings.profile.name) ? ` — ${firstName(settings.profile.name)}` : ''
@@ -212,12 +213,16 @@ export async function exportExtraPdf(year, month) {
 }
 
 // ملف التأخيرات السنوي (التعديل ٦): ملخص + جدولان جنب بعض
-export async function exportTardiesPdf(year) {
+export async function exportTardiesPdf(yearOrRange) {
   const settings = getSettings()
   const records = getRecords() || {}
   const rows = []
   let wSum = 0
-  for (const dk of Object.keys(records).filter(k => k.startsWith(String(year))).sort()) {
+  const isRange = yearOrRange && typeof yearOrRange === 'object' && yearOrRange.from && yearOrRange.to
+  const title = isRange ? `${yearOrRange.from} إلى ${yearOrRange.to}` : String(yearOrRange)
+  const fileTag = isRange ? `${yearOrRange.from.slice(0,7)}_${yearOrRange.to.slice(0,7)}` : String(yearOrRange)
+  const keys = Object.keys(records).filter(k => isRange ? (k >= yearOrRange.from && k <= yearOrRange.to) : k.startsWith(String(yearOrRange))).sort()
+  for (const dk of keys) {
     const rec = records[dk]
     if (!rec || !rec.checkIn) continue
     let w = 0
@@ -230,11 +235,11 @@ export async function exportTardiesPdf(year) {
   }
   const doc = newDoc()
   const userName = firstName(settings.profile && settings.profile.name) ? ` — ${firstName(settings.profile.name)}` : ''
-  header(doc, `ملف التأخيرات ${year}${userName}`, `تاريخ الاستخراج: ${new Date().toLocaleDateString('en-CA')}`)
+  header(doc, `ملف التأخيرات ${title}${userName}`, `تاريخ الاستخراج: ${new Date().toLocaleDateString('en-CA')}`)
   line(doc, `عدد أيام التأخير: ${rows.length} — عدد التأخيرات: ${wSum}`, 36)
   const yEnd = duoTable(doc, [ar('عدد التأخيرات'), ar('موعد الحضور'), ar('اليوم')], rows, 42)
   signDoc(doc, yEnd)
-  return savePdf(doc, SUB.tard, `tardies-${year}.pdf`)
+  return savePdf(doc, SUB.tard, `tardies-${fileTag}.pdf`)
 }
 
 // v12.9.63: ترقيم مضمون — عدّاد محفوظ + فحص الفولدر (الحد الأبعد)

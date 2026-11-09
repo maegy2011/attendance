@@ -5,15 +5,18 @@ export const SHIFT_OPTIONS = [
   { v: 'shift1', label: 'وردية أولى' },
   { v: 'shift2', label: 'وردية تانية' },
   { v: 'shift3', label: 'وردية تالتة' },
+  // تعديل 7 (v12.12): الوردية الخاصة
+  { v: 'shiftX', label: 'وردية خاصة' },
   { v: 'no_task', label: 'لا يوجد تكليف' },
 ]
 
-export const SHIFT_LABEL = { shift1: 'وردية أولى', shift2: 'وردية تانية', shift3: 'وردية تالتة', no_task: 'لا يوجد تكليف' }
+export const SHIFT_LABEL = { shift1: 'وردية أولى', shift2: 'وردية تانية', shift3: 'وردية تالتة', shiftX: 'وردية خاصة', no_task: 'لا يوجد تكليف' }
 
 // الورديات المسموحة لكل نوع (التعديل 21: مأمورية/مهمة = لا يوجد تكليف + أولى فقط)
 export function allowedShifts(type) {
   if (type === 'errand' || type === 'official_mission') return ['no_task', 'shift1']
-  return ['shift1', 'shift2', 'shift3', 'no_task']
+  // تعديل 7 (v12.12): إذن التأخير متاح للوردية الخاصة (تأخيرها يتحسب مع البند 3)
+  return ['shift1', 'shift2', 'shift3', 'shiftX', 'no_task']
 }
 
 export function parseTimeToMin(t) {
@@ -37,12 +40,14 @@ function parseEnd(t, fallback) {
   return v
 }
 
-// بداية الوردية بالدقايق — لا يوجد تكليف = بداية العمل الرسمي
+// بداية الوردية بالدقايق — لا يوجد تكليف = بداية العمل الرسمي — الخاصة = الأولى (التصاريح بلا اختيار خاص)
 export function getShiftStartMin(settings, shift) {
   const s = settings || {}
   if (shift === 'shift1') return parseTimeToMin(s.shift1?.start) ?? 8 * 60
   if (shift === 'shift2') return parseTimeToMin(s.shift2?.start) ?? 16 * 60
   if (shift === 'shift3') return parseTimeToMin(s.shift3?.start) ?? 0
+  // تعديل 1 (دورة جديدة): بداية أول خاصة مسجلة
+  if (shift === 'shiftX') return parseTimeToMin(s.specialShifts && s.specialShifts[0] && s.specialShifts[0].start) ?? 8 * 60
   return parseTimeToMin(s.officialStart) ?? 8 * 60
 }
 

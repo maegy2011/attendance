@@ -4,6 +4,7 @@ import HomeNew from './pages/HomeNew'
 import Records from './pages/Records'
 import AltDays from './pages/AltDays'
 import Stats from './pages/Stats'
+import ExtraNotes from './pages/ExtraNotes'
 import Settings from './pages/Settings'
 import Vacations from './pages/Vacations'
 import Permits from './pages/Permits'
@@ -45,9 +46,7 @@ function AppInner() {
     try { return localStorage.getItem('disclaimerAccepted') === 'true' && localStorage.getItem('onboardingVersion') === APP_VERSION } catch { return false }
   }
   const [gateDone, setGateDone] = useState(isOnboarded)
-  // v12.9.50: المعالج اتحذف نهائيًا
-  // v12.5.11: أول تشغيل = ظهور 2.5/كلية 3 — العادية = ظهور 3/كلية 3.5
-  const [freshRun] = useState(() => !isOnboarded())
+  // تعديل 2 (2 نوفمبر 2026): الظهور 2 ثانية والمدة الكلية 2.85 للعادي واول تثبيت زي بعض
   const [splash, setSplash] = useState(isOnboarded)
   useEffect(() => {
     if (gateDone) return
@@ -57,7 +56,7 @@ function AppInner() {
   }, [gateDone])
   return (
     <>
-      {splash && <Splash onDone={() => setSplash(false)} fadeMs={freshRun ? 2500 : 3000} totalMs={freshRun ? 3000 : 3500} />}
+      {splash && <Splash onDone={() => setSplash(false)} fadeMs={1000} totalMs={1500} />}
       <DisclaimerGate />
       {!unlocked && <PinLock onUnlock={() => setUnlocked(true)} />}
       {unlocked && (
@@ -91,6 +90,7 @@ export default function App() {
               <Route path="/vacations" element={<Vacations />} />
               <Route path="/permits" element={<Permits />} />
               <Route path="/stats" element={<Stats />} />
+              <Route path="/notes" element={<ExtraNotes />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Routes>

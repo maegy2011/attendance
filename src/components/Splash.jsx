@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { version } from '../../package.json'
+import splashLogo from '../assets/splash-logo.jpg' // fix2: دمج اللوجو جوه الملف — مايحتاجش ملفات جنبه
 
-// v12.5.11: شاشة الافتتاح — الحاوية بيضا معتمة من أول فريم (مفيش فلاش للرئيسية)
-// اللوجو يظهر تدريجيًا (عادية 3 ثواني / أول تثبيت 2.5) + اختفاء ناعم — والدوس يعديها
-export default function Splash({ onDone, fadeMs = 3000, totalMs = 3500 }) {
+// تعديل 2 (2 نوفمبر 2026): الظهور التدريجي 2 ثانية للوجو مع الاسم والاصدار — المدة الكلية 2.5 + 0.35 اختفاء = 2.85
+// اللوجو يظهر تدريجيًا (2 ثانية) + اختفاء ناعم — والدوس يعديها
+export default function Splash({ onDone, fadeMs = 2000, totalMs = 2500 }) {
   const [logoVis, setLogoVis] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const doneRef = useRef(false)
@@ -28,14 +29,14 @@ export default function Splash({ onDone, fadeMs = 3000, totalMs = 3500 }) {
       className={`fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center cursor-pointer transition-opacity duration-300 ${leaving ? 'opacity-0' : 'opacity-100'}`}
     >
       <img
-        src="splash-logo.jpg"
+        src={splashLogo}
         alt="HR assist"
         className={`w-[200px] transition-opacity ${logoVis && !leaving ? 'opacity-100' : 'opacity-0'}`}
         style={{ transitionDuration: `${fadeMs}ms` }}
       />
       <div
-        className="absolute bottom-12 inset-x-0 text-center text-xs text-slate-400"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        className={`absolute bottom-12 inset-x-0 text-center text-xs text-slate-400 transition-opacity ${logoVis && !leaving ? 'opacity-100' : 'opacity-0'}`}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)', transitionDuration: `${fadeMs}ms` }}
       >
         Amr Adel@2026 • v{version}
       </div>

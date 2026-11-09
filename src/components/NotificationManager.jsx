@@ -9,10 +9,11 @@ import { getB, countAnnualDelays, ensureChannels, CH_ATTENDANCE, CH_GENERAL } fr
 import { getDisplayAltDays } from '../utils/altDays'
 import { computeDisplayLeaves } from '../utils/leaveCounts'
 import { getPlan, planProgress, PLAN_EVENT, nextCycleStart } from '../utils/planWeek'
+import { getSpecialForRecord } from '../utils/specials'
 import { getDayNameAr } from '../utils/vacationLogic'
 
 // v12.10.21 — الصياغات الجديدة (الفعل + اليوم + المعاد): أسماء الورديات والأيام والتقارير
-const SHIFT_LABELS = { shift1: 'الأولى', shift2: 'الثانية', shift3: 'الثالثة' }
+const SHIFT_LABELS = { shift1: 'الأولى', shift2: 'الثانية', shift3: 'الثالثة', shiftX: 'الخاصة' }
 const LEAVE_LABELS_BG = { regular_vacation: 'إجازة اعتيادية', rest_day: 'إجازة بدل راحة', sick: 'إجازة مرضي', unpaid: 'بدون أجر', special: 'إجازة خاصة' }
 const DOW_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
 
@@ -29,6 +30,8 @@ function shiftForDay(rec, settings) {
   if (t === 'shift1') return settings.shift1 || { start: '08:00', end: '17:00' }
   if (t === 'shift2') return settings.shift2 || { start: '16:00', end: '00:00' }
   if (t === 'shift3') return settings.shift3 || { start: '00:00', end: '08:00' }
+  // تعديل 1 (دورة جديدة): الوردية الخاصة المختارة للسجل — الأولى افتراضي
+  if (t === 'shiftX') return getSpecialForRecord(settings, rec) || { start: '08:00', end: '17:00' }
   return settings.shift1 || { start: '08:00', end: '17:00' }
 }
 
@@ -94,7 +97,7 @@ export default function NotificationManager() {
         const isWeekend = weekendDays.includes(dow)
         // نوع الإجازة الفعال: الصريح، وإلا الافتراضي (أحد–خميس=حضور / جمعة–سبت=بدون تكليف/راحة)
         let dayCalc = rec.dayCalculation || rec.dayType || ''
-        if (dayCalc === 'shift1' || dayCalc === 'shift2' || dayCalc === 'shift3' || dayCalc === 'no_task') dayCalc = ''
+        if (dayCalc === 'shift1' || dayCalc === 'shift2' || dayCalc === 'shift3' || dayCalc === 'shiftX' || dayCalc === 'no_task') dayCalc = ''
         if (!dayCalc && !rec.shift && !rec.dayStatus && !rec.checkIn && isWeekend) dayCalc = 'weekend_rest'
         // حضور (صريح أو حكمي) = كمّل — أي إجازة/راحة = اقف
         if (dayCalc !== '' && dayCalc !== 'present') continue
@@ -102,12 +105,17 @@ export default function NotificationManager() {
         if (rec.checkIn) continue
         // الوردية الفعالة: الصريحة من نظام العمل — لا يوجد تكليف ← المواعيد الرسمية (قاعدة عمرو: شغال على الرسمية فقط)
         let shiftRaw = rec.shift || ''
-        if (!shiftRaw && (rec.dayType === 'shift1' || rec.dayType === 'shift2' || rec.dayType === 'shift3' || rec.dayType === 'no_task')) shiftRaw = rec.dayType
+        if (!shiftRaw && (rec.dayType === 'shift1' || rec.dayType === 'shift2' || rec.dayType === 'shift3' || rec.dayType === 'shiftX' || rec.dayType === 'no_task')) shiftRaw = rec.dayType
         // v12.11: وردية صريحة ← نظام العمل / لا يوجد تكليف ← الرسمية / الفاضي ← مفيش إشعار
         let startStr, shiftLabel
         if (['shift1', 'shift2', 'shift3'].includes(shiftRaw)) {
           startStr = (settings[shiftRaw] && settings[shiftRaw].start) || (settings.shift1 && settings.shift1.start) || '08:00'
           shiftLabel = SHIFT_LABELS[shiftRaw] || ''
+        // تعديل 1 (دورة جديدة): حضور الخاصة المختارة للسجل
+        } else if (shiftRaw === 'shiftX') {
+          const spx = getSpecialForRecord(settings, rec) || {}
+          startStr = spx.start || '08:00'
+          shiftLabel = spx.name || SHIFT_LABELS[shiftRaw] || 'الخاصة'
         } else if (shiftRaw === 'no_task') {
           startStr = settings.officialStart || '08:00'
           shiftLabel = 'الرسمية'
@@ -143,14 +151,17 @@ export default function NotificationManager() {
         if (DAY_OFF_TYPES.includes(rec.dayType)) continue
         // نوع الإجازة الفعال: حضور (صريح أو حكمي) = كمّل — أي إجازة/راحة = اقف
         let dayCalc = rec.dayCalculation || rec.dayType || ''
-        if (dayCalc === 'shift1' || dayCalc === 'shift2' || dayCalc === 'shift3' || dayCalc === 'no_task') dayCalc = ''
+        if (dayCalc === 'shift1' || dayCalc === 'shift2' || dayCalc === 'shift3' || dayCalc === 'shiftX' || dayCalc === 'no_task') dayCalc = ''
         if (dayCalc !== '' && dayCalc !== 'present') continue
         // الانصراف الفعال: الورديات ← نظام العمل — لا يوجد تكليف ← الرسمية (قاعدة عمرو) — الفاضي ← مفيش تذكير
         let shiftRaw = rec.shift || ''
-        if (!shiftRaw && (rec.dayType === 'shift1' || rec.dayType === 'shift2' || rec.dayType === 'shift3' || rec.dayType === 'no_task')) shiftRaw = rec.dayType
+        if (!shiftRaw && (rec.dayType === 'shift1' || rec.dayType === 'shift2' || rec.dayType === 'shift3' || rec.dayType === 'shiftX' || rec.dayType === 'no_task')) shiftRaw = rec.dayType
         let endStr
         if (['shift1', 'shift2', 'shift3'].includes(shiftRaw)) {
           endStr = (settings[shiftRaw] && settings[shiftRaw].end) || (settings.shift1 && settings.shift1.end) || '17:00'
+        // تعديل 1 (دورة جديدة): انصراف الخاصة المختارة للسجل
+        } else if (shiftRaw === 'shiftX') {
+          endStr = (getSpecialForRecord(settings, rec) || {}).end || '17:00'
         } else if (shiftRaw === 'no_task') {
           endStr = settings.officialEnd || '15:00'
         } else continue
@@ -164,7 +175,7 @@ export default function NotificationManager() {
         }
         // v12.10: اليوم الحالي لازم حضور مسجل — الأيام القادمة المخططة (وردية صريحة) تُجدول مسبقًا
         const isFuture = dk > dateKeyOf(now)
-        const plannedShift = ['shift1', 'shift2', 'shift3'].includes(rec.shift || '')
+        const plannedShift = ['shift1', 'shift2', 'shift3', 'shiftX'].includes(rec.shift || '')
         if (rec.checkOut) continue
         // 3) v12.11.4: نسيت الحضور — قبل سطر التخطي (النهاردة والأيام الفاتت بس + لا بصمة + بداية الوردية/الرسمية + ساعة)
         try {
@@ -172,6 +183,8 @@ export default function NotificationManager() {
           if (dk <= dateKeyOf(now) && !rec.checkIn) {
             let startStr3 = null
             if (['shift1', 'shift2', 'shift3'].includes(shiftRaw)) startStr3 = (settings[shiftRaw] && settings[shiftRaw].start) || (settings.shift1 && settings.shift1.start) || '08:00'
+            // تعديل 1 (دورة جديدة): حضور الخاصة المختارة للسجل
+            else if (shiftRaw === 'shiftX') startStr3 = (getSpecialForRecord(settings, rec) || {}).start || '08:00'
             else if (shiftRaw === 'no_task') startStr3 = settings.officialStart || '08:00'
             if (startStr3) {
               const [sh3, sm3] = startStr3.split(':').map(Number)
